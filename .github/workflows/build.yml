@@ -1,0 +1,129 @@
+name: TDLib derle (Android + Windows)
+
+# Elle tetiklenebilir, ayrica bu depoya her gonderimde calisir.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      tdlib_ref:
+        description: "TDLib surumu: master (en guncel) veya bir etiket, orn. v1.8.67"
+        required: false
+        default: "master"
+
+jobs:
+  # ---------------------------------------------------------------
+  # ANDROID: 4 mimari + Java arayuzu (TdApi.java, Client.java uretir)
+  # ---------------------------------------------------------------
+  android:
+    name: Android (arm64-v8a, armeabi-v7a, x86_64, x86 + Java)
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: TDLib kaynagini al
+        uses: actions/checkout@v4
+        with:
+          repository: tdlib/td
+          ref: ${{ github.event.inputs.tdlib_ref || 'master' }}
+          path: td
+
+      - name: Derlenen surumu yaz
+        run: |
+          grep -m1 "project(TDLib VERSION" td/CMakeLists.txt
+          echo "commit: $(git -C td rev-parse HEAD)"
+
+      - name: Gerekli araclari kur
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gperf php-cli make perl unzip zip
+
+      - name: Ortam kontrolu (TDLib'in kendi scripti)
+        working-directory: td/example/android
+        run: ./check-environment.sh && echo "ortam TAMAM"
+
+      - name: Android SDK + NDK indir
+        working-directory: td/example/android
+        run: ./fetch-sdk.sh
+
+      - name: OpenSSL derle (4 mimari)
+        working-directory: td/example/android
+        run: ./build-openssl.sh
+
+      - name: TDLib derle (4 mimari, Java arayuzu)
+        working-directory: td/example/android
+        run: ./build-tdlib.sh
+
+      - name: Ne uretildi?
+        working-directory: td/example/android
+        run: |
+          echo "--- kutuphane dosyalari ---"
+          find tdlib/libs -type f -exec ls -lh {} \;
+          echo "--- java dosyalari ---"
+          find tdlib/java -name "*.java" -exec ls -lh {} \;
+
+      - name: Cikti yukle (kutuphaneler + Java)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-android
+          path: |
+            td/example/android/tdlib/libs/
+            td/example/android/tdlib/java/
+          if-no-files-found: error
+
+      - name: Cikti yukle (javadoc)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-android-javadoc
+          path: td/example/android/tdlib/javadoc/
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------
+  # WINDOWS: x64 icin tdjson.dll + baslik dosyalari
+  # ---------------------------------------------------------------
+  windows:
+    name: Windows x64 (tdjson.dll + basliklar)
+    runs-on: windows-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: TDLib kaynagini al
+        uses: actions/checkout@v4
+        with:
+          repository: tdlib/td
+          ref: ${{ github.event.inputs.tdlib_ref || 'master' }}
+          path: td
+
+      - name: Derlenen surumu yaz
+        shell: bash
+        run: grep -m1 "project(TDLib VERSION" td/CMakeLists.txt
+
+      - name: vcpkg bagimliliklari (gperf, openssl, zlib)
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install gperf:x64-windows openssl:x64-windows zlib:x64-windows
+
+      - name: TDLib derle (Release)
+        shell: pwsh
+        run: |
+          cd td
+          mkdir build
+          cd build
+          cmake -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_INSTALL_PREFIX:PATH=../../tdlib-windows `
+            ..
+          cmake --build . --target install --config Release
+
+      - name: Ne uretildi?
+        shell: bash
+        run: |
+          echo "--- tdlib-windows icerigi ---"
+          find tdlib-windows -type f | head -60
+
+      - name: Cikti yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-windows-x64
+          path: tdlib-windows/
+          if-no-files-found: error
