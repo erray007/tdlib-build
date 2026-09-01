@@ -7,9 +7,22 @@ on:
   workflow_dispatch:
     inputs:
       tdlib_ref:
-        description: "TDLib surumu: master (en guncel) veya bir etiket, orn. v1.8.67"
+        description: "TDLib surumu: bos birakilirsa asagidaki sabit commit; master ya da bir etiket de yazilabilir"
         required: false
-        default: "master"
+        default: ""
+
+# NVGram'in kullandigi TDLib surumu, COMMIT olarak sabit.
+#
+# Neden "master" degil: uygulamadaki TdApi.java bu commit'ten uretildi.
+# master ilerledikce API degisiyor (alan ekleniyor, imza degisiyor) ve
+# yeni kutuphaneyle eski TdApi.java'yi kullanmak calisma aninda coker.
+# Kutuphaneyi yalniz sembol eklemek icin yeniden derlerken surumun AYNI
+# kalmasi sart; sembol eklemek API'yi degistirmemeli.
+#
+# TDLib'i bilerek yukseltmek istendiginde burasi degistirilir ve
+# uygulamadaki TdApi.java da yeni ciktiyla guncellenir.
+env:
+  NVGRAM_TDLIB_COMMIT: d1085f9cebc5a62379991ae1652673954f229c1f  # 1.8.67
 
 jobs:
   # ---------------------------------------------------------------
@@ -25,7 +38,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: tdlib/td
-          ref: ${{ github.event.inputs.tdlib_ref || 'master' }}
+          ref: ${{ github.event.inputs.tdlib_ref || env.NVGRAM_TDLIB_COMMIT }}
           path: td
 
       - name: Derlenen surumu yaz
@@ -62,6 +75,39 @@ jobs:
           echo "--- java dosyalari ---"
           find tdlib/java -name "*.java" -exec ls -lh {} \;
 
+      # Play, yerel kod iceren paketlerde cokme kayitlarini cozumleyebilmek
+      # icin sembol iceren kutuphane istiyor. TDLib'in CMake dosyasi
+      # (example/android/CMakeLists.txt) su iki adimi yapiyor:
+      #
+      #   rename libtdjni.so -> libtdjni.so.debug
+      #   strip --strip-debug --strip-unneeded libtdjni.so.debug -o libtdjni.so
+      #
+      # Yani ".debug" uzantili dosya, "sadece semboller" degil, STRIP
+      # EDILMEMIS kutuphanenin ta kendisi. Uygulamada libtdjni.so olarak
+      # kullanilabilir; AGP paketlerken kendisi striplayip sembolleri
+      # ayri cikariyor.
+      #
+      # build-tdlib.sh bu dosyalari tdlib-debug.zip'e koyduktan SONRA
+      # libs/ altindan siliyor; bu yuzden zip'ten geri cikariliyorlar.
+      - name: Sembollu kutuphaneleri ayikla
+        working-directory: td/example/android/tdlib
+        run: |
+          mkdir -p ../semboller
+          unzip -o tdlib-debug.zip 'tdlib/libs/*/*.debug' -d ../semboller
+          echo "--- sembollu dosyalar ---"
+          find ../semboller -name "*.debug" -exec ls -lh {} \;
+          # Sembol tablosu gercekten var mi: strip edilmis surum birkac MB,
+          # sembollu surum onlarca kat buyuk. Bos ya da yanlis dosya
+          # geldiyse burada anlasilir.
+          echo "--- strip edilmis karsiligi (karsilastirma icin) ---"
+          ls -lh libs/arm64-v8a/libtdjni.so
+          READELF=$(find .. -name "llvm-readelf" -type f 2>/dev/null | head -1)
+          if [ -n "$READELF" ] ; then
+            echo "--- bolumler (symtab bekleniyor) ---"
+            "$READELF" --section-headers ../semboller/tdlib/libs/arm64-v8a/libtdjni.so.debug \
+              | grep -E "symtab|debug_info" || echo "UYARI: sembol bolumu bulunamadi"
+          fi
+
       - name: Cikti yukle (kutuphaneler + Java)
         uses: actions/upload-artifact@v4
         with:
@@ -69,6 +115,14 @@ jobs:
           path: |
             td/example/android/tdlib/libs/
             td/example/android/tdlib/java/
+          if-no-files-found: error
+
+      # Ayri artifact: sembollu dosyalar buyuk, her indirmede gelmesinler.
+      - name: Cikti yukle (sembollu kutuphaneler)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdlib-android-semboller
+          path: td/example/android/semboller/
           if-no-files-found: error
 
       - name: Cikti yukle (javadoc)
@@ -91,7 +145,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: tdlib/td
-          ref: ${{ github.event.inputs.tdlib_ref || 'master' }}
+          ref: ${{ github.event.inputs.tdlib_ref || env.NVGRAM_TDLIB_COMMIT }}
           path: td
 
       - name: Derlenen surumu yaz
