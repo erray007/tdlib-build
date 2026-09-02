@@ -17,6 +17,9 @@
 
 #include "Instance.h"
 #include "InstanceImpl.h"
+// Instance.h PlatformContext'i yalnizca ILERI BILDIRIYOR; ondan tureyen
+// bir sinif yazmak icin tam tanim gerekiyor.
+#include "PlatformContext.h"
 #include "StaticThreads.h"
 #include "v2/InstanceV2Impl.h"
 #include "v2/InstanceV2ReferenceImpl.h"
@@ -24,6 +27,9 @@
 #include <rtc_base/ssl_adapter.h>
 #include <sdk/android/native_api/base/init.h>
 #include <sdk/android/native_api/jni/jvm.h>
+// webrtc::JVM burada; ses aygiti katmani JVM'e bu sinif uzerinden
+// ulasiyor ve baslatilmazsa mikrofon hic acilmiyor.
+#include <modules/utility/include/jvm_android.h>
 
 using namespace tgcalls;
 
