@@ -30,6 +30,18 @@ if(NVCALLS_OPUS_SAYISI LESS 50)
     message(FATAL_ERROR "nvcalls: opus kaynaklari bulunamadi, suzgec guncellenmeli")
 endif()
 
+# --- linker bayraklarini temizle ---
+#
+# Ana CMakeLists CMAKE_SHARED_LINKER_FLAGS icine uzun bir --exclude-libs
+# listesi koyuyor: libtgnet.a, libflac.a, librlottie.a, libsqlite.a...
+# Bunlar Telegram'in kendi hedefleri ve biz onlari DERLEMIYORUZ. Bayrak
+# global oldugu icin bizim hedefimize de gecip linki dusuruyor
+# ("cannot open libtgnet.a").
+#
+# Degisken hedef olusturulurken okundugu icin temizlik add_library'den
+# ONCE yapilmali. Ana hedef coktan tanimlandigindan etkilenmiyor.
+set(CMAKE_SHARED_LINKER_FLAGS "")
+
 add_library(nvcalls SHARED
         ${CMAKE_CURRENT_LIST_DIR}/nvcalls.cpp
         ${NVCALLS_OPUS})
@@ -43,6 +55,13 @@ target_compile_options(nvcalls PRIVATE -O3 -fexceptions -frtti -Wno-unknown-prag
 # tutuyor. Bayrak olmadan kutuphane bu cihazlarda hic yuklenmiyor.
 target_link_options(nvcalls PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_options(nvcalls PRIVATE "-Wl,-z,common-page-size=16384")
+
+# Statik kutuphanelerin sembolleri disa acilmiyor. Disariya yalniz kendi
+# JNI islevlerimiz cikiyor - onlar bu hedefin kendi kaynagindan geldigi
+# icin etkilenmiyorlar. Kazanci iki yonlu: kutuphane kuculuyor ve
+# WebRTC'nin sembolleri TDLib'inkilerle cakismiyor (ikisi de ayni
+# surecte yuklu ve ikisinde de boringssl var).
+target_link_options(nvcalls PRIVATE "-Wl,--exclude-libs,ALL")
 
 # whole-archive olanlar: bu uc kutuphane isini STATIK KAYITLA yapiyor
 # (ses aygiti kaydi, kodlayici kaydi). Linker "kimse cagirmiyor" deyip
