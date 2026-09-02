@@ -59,6 +59,13 @@ jobs:
         abi: [arm64-v8a, armeabi-v7a, x86_64, x86]
 
     steps:
+      # Bu depo: cmake/AndroidNdkModules.cmake icin. Neyin eksik oldugu
+      # o dosyanin basinda yaziyor.
+      - name: Bu depoyu al
+        uses: actions/checkout@v4
+        with:
+          path: nvgram
+
       # Sadece gereken iki klasor cekiliyor. Telegram deposunun tamami
       # calisma alanini gereksiz sisiriyor; jni/ derleme icin, org/webrtc
       # ise tgcalls'in Android ses katmani JNI ile bu Java siniflarini
@@ -117,8 +124,9 @@ jobs:
       # olculdu, baska bir bagi yok.
       - name: Yapilandir (${{ matrix.abi }})
         run: |
-          cmake -G Ninja \
+          cmake -G Ninja -Wno-dev \
             -DCMAKE_TOOLCHAIN_FILE="$NDK_YOLU/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_MODULE_PATH="$GITHUB_WORKSPACE/nvgram/cmake" \
             -DANDROID_ABI="${{ matrix.abi }}" \
             -DANDROID_PLATFORM=android-21 \
             -DANDROID_STL=c++_static \
