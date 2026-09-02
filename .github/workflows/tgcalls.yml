@@ -114,6 +114,20 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$SURUM"
           echo "NDK_YOLU=$ANDROID_HOME/ndk/$SURUM" >> "$GITHUB_ENV"
 
+      # Kopru hedefi Telegram'in CMake dosyasina ekleniyor.
+      #
+      # Ayri bir CMake projesi kurmak yerine boyle yapiliyor cunku
+      # koprunun ihtiyaci olan her sey (opus kaynaklari, boringssl ve
+      # ffmpeg yollari, tgcalls hedefleri) zaten o dosyada tanimli.
+      # Ekleme dosyanin SONUNA yapiliyor; oncesindeki hicbir sey
+      # degismiyor.
+      - name: Kopruyu Telegram'in derlemesine ekle
+        run: |
+          echo "" >> telegram/TMessagesProj/jni/CMakeLists.txt
+          echo "include($GITHUB_WORKSPACE/nvgram/nvcalls/CMakeLists.txt)" \
+            >> telegram/TMessagesProj/jni/CMakeLists.txt
+          tail -3 telegram/TMessagesProj/jni/CMakeLists.txt
+
       # Telegram'in KENDI ana CMakeLists'i yapilandiriliyor, ama tamami
       # derlenmiyor. Ana dosya opus, boringssl ve ffmpeg yollarini zaten
       # dogru kuruyor; kendi CMake dosyamizi yazsak bu kurulumu elle
@@ -145,25 +159,46 @@ jobs:
       #   voipandroid : Android ses aygiti katmani (OpenSL ES / AAudio)
       #   rnnoise     : gurultu bastirma
       #   openh264    : video kodlayici; tgcalls hedefi buna bagli
+      # nvcalls hedefi digerlerinin hepsine bagli oldugu icin tek basina
+      # istemek yeterli; CMake gerekenleri sirasiyla derliyor.
       - name: Derle
         run: |
-          cmake --build derleme --target tgcalls tgcalls_tp voipandroid rnnoise openh264 -- -j"$(nproc)"
+          cmake --build derleme --target nvcalls -- -j"$(nproc)"
 
       - name: Ne uretildi?
         run: |
-          echo "--- kutuphaneler ---"
-          find derleme -name "*.a" -newer derleme/CMakeCache.txt -exec ls -lh {} \; | sort -k9
+          echo "--- kopru kutuphanesi ---"
+          find derleme -name "libnvcalls.so" -exec ls -lh {} \;
           echo
-          echo "--- toplam ---"
-          find derleme -name "*.a" -newer derleme/CMakeCache.txt -exec du -cb {} + | tail -1
+          echo "--- strip edilmis boyut (uygulamaya girecek olan) ---"
+          STRIP=$(find "$NDK_YOLU" -name "llvm-strip" -type f | head -1)
+          for f in $(find derleme -name "libnvcalls.so") ; do
+            "$STRIP" --strip-unneeded "$f" -o /tmp/stripli.so
+            ls -lh /tmp/stripli.so
+          done
+          echo
+          echo "--- disa acilan JNI islevleri ---"
+          NM=$(find "$NDK_YOLU" -name "llvm-nm" -type f | head -1)
+          "$NM" --defined-only --extern-only $(find derleme -name "libnvcalls.so" | head -1) \
+            | grep -c "Java_com_eray" || true
+          echo
+          echo "--- ara kutuphaneler ---"
+          find derleme -name "*.a" -newer derleme/CMakeCache.txt -exec ls -lh {} \; | sort -k9
 
       # Ciktiyi tek klasorde topla: .a dosyalari, tgcalls basliklari ve
       # cagri katmaninin ihtiyac duydugu Java siniflari.
+      # Uygulamaya girecek olan tek dosya: strip edilmis libnvcalls.so.
+      # Ara .a dosyalari (mimari basina yarim GB) ARTIK TOPLANMIYOR -
+      # yerelde onlara ihtiyac yok, kopru zaten burada linkleniyor.
       - name: Ciktiyi topla
         run: |
           HEDEF="cikti/${{ matrix.abi }}"
-          mkdir -p "$HEDEF/lib"
-          find derleme -name "*.a" -newer derleme/CMakeCache.txt -exec cp {} "$HEDEF/lib/" \;
+          mkdir -p "$HEDEF"
+          STRIP=$(find "$NDK_YOLU" -name "llvm-strip" -type f | head -1)
+          "$STRIP" --strip-unneeded \
+            "$(find derleme -name 'libnvcalls.so' | head -1)" \
+            -o "$HEDEF/libnvcalls.so"
+          ls -lh "$HEDEF/libnvcalls.so"
 
           # Basliklar ve Java siniflari mimariye gore degismiyor; yalniz
           # arm64 isinde toplaniyor ki dort artifact ayni dosyalari
