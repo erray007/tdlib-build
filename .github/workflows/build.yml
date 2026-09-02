@@ -1,9 +1,15 @@
 name: TDLib derle (Android + Windows)
 
-# Elle tetiklenebilir, ayrica bu depoya her gonderimde calisir.
+# Elle tetiklenebilir, ayrica kendi dosyasi degistiginde calisir.
+#
+# paths filtresi neden var: depoda artik tgcalls icin ayri bir is akisi da
+# duruyor. Filtre olmadan orada yapilan her degisiklik saatler suren bir
+# TDLib derlemesini bosuna baslatiyor.
 on:
   push:
     branches: [ main ]
+    paths:
+      - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
       tdlib_ref:

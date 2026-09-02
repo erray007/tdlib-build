@@ -1,0 +1,190 @@
+name: tgcalls derle (Android, sesli cagri)
+
+# Sesli cagrida TDLib yalniz SINYALLESMEYI veriyor: CreateCall, AcceptCall,
+# DiscardCall, SendCallSignalingData ve CallStateReady. Sesin kendisini
+# tasiyan kod TDLib'de YOK; CallStateReady'nin son alani bunu acikca
+# soyluyor: "Custom JSON-encoded call parameters to be passed to tgcalls".
+#
+# tgcalls, WebRTC uzerine kurulu ayri bir C++ kutuphanesi. Kaynagi
+# Telegram'in Android deposunda: TMessagesProj/jni/voip/.
+#
+# Neden Telegram deposundan, TelegramMessenger/tgcalls deposundan degil:
+# tgcalls'in kendi deposu WebRTC'yi ICERMIYOR, disaridan bekliyor. Ustelik
+# WebRTC'nin kendi derleme sistemi (depot_tools + gn) on GB'lik bir
+# checkout ve saatlerce surecek bir kurulum istiyor. Telegram ise WebRTC'nin
+# KIRPILMIS bir kopyasini (65 MB) depoya koymus ve duz CMake ile derliyor.
+# Bagimliliklar da (boringssl, ffmpeg, vpx, dav1d) depoda hazir .a olarak
+# duruyor. Yani bu yolda derlenecek tek sey tgcalls + kirpilmis WebRTC.
+#
+# LISANS: Telegram'in Android deposu GPLv2. Bu kutuphaneyi kullanan
+# uygulamanin da GPLv2 kosullarina uymasi gerekiyor.
+
+on:
+  workflow_dispatch:
+    inputs:
+      telegram_ref:
+        description: "Telegram surumu: bos birakilirsa asagidaki sabit commit"
+        required: false
+        default: ""
+      ndk_version:
+        description: "NDK surumu (bos = asagidaki sabit surum)"
+        required: false
+        default: ""
+
+env:
+  # Telegram Android 12.6.4 (6666). COMMIT olarak sabit.
+  #
+  # Neden "master" degil: TDLib'de ogrendigimiz dersin aynisi. Ustteki depo
+  # ilerledikce tgcalls'in API'si ve WebRTC'nin kirpilmis kopyasi degisiyor.
+  # Yazacagimiz JNI koprusu belli bir API'ye gore yazilacak; kutuphaneyi
+  # yeniden derlerken surumun AYNI kalmasi sart.
+  NVGRAM_TELEGRAM_COMMIT: 009e97356f966bb81eceba113d210230bf383122
+
+  # NDK r27c. 16 KB sayfa boyutu destegi bu surumle varsayilan geliyor;
+  # targetSdk 36 ile Play bunu zorunlu tutuyor. Telegram'in kendi
+  # build.gradle'i NDK 21 yaziyor ama yaninda 26.3'u de yorumda tutuyor.
+  NVGRAM_NDK: 27.2.12479018
+
+jobs:
+  derle:
+    name: ${{ matrix.abi }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+
+    # Dort mimari ayri makinede paralel derleniyor. Tek makinede sirayla
+    # derlemek dort kat surerdi; hedef basina 1357 kaynak dosya var.
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64, x86]
+
+    steps:
+      # Sadece gereken iki klasor cekiliyor. Telegram deposunun tamami
+      # calisma alanini gereksiz sisiriyor; jni/ derleme icin, org/webrtc
+      # ise tgcalls'in Android ses katmani JNI ile bu Java siniflarini
+      # cagirdigi icin lazim.
+      - name: Telegram kaynagini al (sadece gereken klasorler)
+        uses: actions/checkout@v4
+        with:
+          repository: DrKLO/Telegram
+          ref: ${{ github.event.inputs.telegram_ref || env.NVGRAM_TELEGRAM_COMMIT }}
+          path: telegram
+          fetch-depth: 1
+          sparse-checkout: |
+            TMessagesProj/jni
+            TMessagesProj/src/main/java/org/webrtc
+
+      - name: Derlenen surumu yaz
+        run: |
+          echo "commit: $(git -C telegram rev-parse HEAD)"
+          echo "tarih : $(git -C telegram log -1 --format=%ad)"
+          echo "konu  : $(git -C telegram log -1 --format=%s)"
+          echo "--- kaynak sayilari ---"
+          echo "webrtc  : $(find telegram/TMessagesProj/jni/voip/webrtc -name '*.cc' -o -name '*.cpp' -o -name '*.c' | wc -l) dosya"
+          echo "tgcalls : $(find telegram/TMessagesProj/jni/voip/tgcalls -name '*.cpp' | wc -l) dosya"
+          echo "org.webrtc java: $(find telegram/TMessagesProj/src/main/java/org/webrtc -name '*.java' | wc -l) sinif"
+
+      # nasm: ana CMakeLists x86 ve x86_64 icin enable_language(ASM_NASM)
+      # cagiriyor, yapilandirma nasm yoksa daha ilk adimda dusuyor.
+      - name: Gerekli araclari kur
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm ninja-build
+
+      # Bu is akisi birden fazla kez calisacak: once kutuphaneler, sonra
+      # JNI koprusu eklenmis hali. Onbellek olmadan her seferinde 1357
+      # dosya bastan derlenir.
+      - name: Derleyici onbellegi
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: tgcalls-${{ matrix.abi }}-${{ github.event.inputs.telegram_ref || env.NVGRAM_TELEGRAM_COMMIT }}
+          max-size: 2G
+
+      - name: NDK kur
+        run: |
+          SURUM="${{ github.event.inputs.ndk_version || env.NVGRAM_NDK }}"
+          echo "NDK surumu: $SURUM"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$SURUM"
+          echo "NDK_YOLU=$ANDROID_HOME/ndk/$SURUM" >> "$GITHUB_ENV"
+
+      # Telegram'in KENDI ana CMakeLists'i yapilandiriliyor, ama tamami
+      # derlenmiyor. Ana dosya opus, boringssl ve ffmpeg yollarini zaten
+      # dogru kuruyor; kendi CMake dosyamizi yazsak bu kurulumu elle
+      # tekrarlamak ve her Telegram surumunde pesinden guncellemek
+      # gerekirdi. Yapilandirma ucuz, derlenen sey asagidaki hedefler.
+      #
+      # voip/CMakeLists.txt disaridan yalniz ${ANDROID_ABI} bekliyor;
+      # olculdu, baska bir bagi yok.
+      - name: Yapilandir (${{ matrix.abi }})
+        run: |
+          cmake -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK_YOLU/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="${{ matrix.abi }}" \
+            -DANDROID_PLATFORM=android-21 \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -S telegram/TMessagesProj/jni \
+            -B derleme
+
+      # tgvoip bilerek disarida: o eski VoIP protokolu (libtgvoip) ve
+      # icindeki JNI dosyasi Telegram'in kendi Java paketine bagli.
+      # Modern cagrilar tgcalls uzerinden yuruyor.
+      #
+      #   tgcalls     : tgcalls + kirpilmis WebRTC (1357 dosya)
+      #   tgcalls_tp  : abseil ve diger ucuncu taraf kod
+      #   voipandroid : Android ses aygiti katmani (OpenSL ES / AAudio)
+      #   rnnoise     : gurultu bastirma
+      #   openh264    : video kodlayici; tgcalls hedefi buna bagli
+      - name: Derle
+        run: |
+          cmake --build derleme --target tgcalls tgcalls_tp voipandroid rnnoise openh264 -- -j"$(nproc)"
+
+      - name: Ne uretildi?
+        run: |
+          echo "--- kutuphaneler ---"
+          find derleme -name "*.a" -newer derleme/CMakeCache.txt -exec ls -lh {} \; | sort -k9
+          echo
+          echo "--- toplam ---"
+          find derleme -name "*.a" -newer derleme/CMakeCache.txt -exec du -cb {} + | tail -1
+
+      # Ciktiyi tek klasorde topla: .a dosyalari, tgcalls basliklari ve
+      # cagri katmaninin ihtiyac duydugu Java siniflari.
+      - name: Ciktiyi topla
+        run: |
+          HEDEF="cikti/${{ matrix.abi }}"
+          mkdir -p "$HEDEF/lib"
+          find derleme -name "*.a" -newer derleme/CMakeCache.txt -exec cp {} "$HEDEF/lib/" \;
+
+          # Basliklar ve Java siniflari mimariye gore degismiyor; yalniz
+          # arm64 isinde toplaniyor ki dort artifact ayni dosyalari
+          # tasimasin.
+          if [ "${{ matrix.abi }}" = "arm64-v8a" ] ; then
+            mkdir -p cikti/ortak
+            cp -r telegram/TMessagesProj/jni/voip/tgcalls cikti/ortak/tgcalls-basliklar
+            find cikti/ortak/tgcalls-basliklar -name "*.cpp" -delete
+            cp -r telegram/TMessagesProj/src/main/java/org/webrtc cikti/ortak/java-org-webrtc
+            # voip/CMakeLists.txt: koprunun hangi hedeflere ve hangi
+            # include yollarina baglanacagi burada yaziyor.
+            cp telegram/TMessagesProj/jni/voip/CMakeLists.txt cikti/ortak/voip-CMakeLists.txt
+            cp telegram/TMessagesProj/jni/voip/org_telegram_messenger_voip_Instance.cpp \
+               cikti/ortak/ornek-jni-koprusu.cpp
+            echo "--- ortak dosyalar ---"
+            du -sh cikti/ortak/*
+          fi
+
+      - name: Cikti yukle (kutuphaneler)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tgcalls-${{ matrix.abi }}
+          path: cikti/${{ matrix.abi }}/
+          if-no-files-found: error
+
+      - name: Cikti yukle (basliklar + java)
+        if: matrix.abi == 'arm64-v8a'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tgcalls-ortak
+          path: cikti/ortak/
+          if-no-files-found: error
