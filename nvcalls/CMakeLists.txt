@@ -63,7 +63,11 @@ list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "tgcalls/legacy/")
 #
 # Cozucu sesli cagrida zaten kullanilmiyor: video yok. Cikarilmasi hem
 # linki duzeltiyor hem de ffmpeg'i tumden gereksiz kiliyor.
+# Cozucu ve fabrika birlikte cikiyor: cozucu tek basina cikarilinca
+# h264.cc onu aramaya devam ediyor (H264Decoder::Create). Yerlerine
+# nvcalls/h264_yok.cpp geciyor.
 list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "codecs/h264/h264_decoder_impl")
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "codecs/h264/h264\.cc")
 set_target_properties(tgcalls PROPERTIES SOURCES "${NVCALLS_TGCALLS_KAYNAKLARI}")
 
 # --- Telegram'in kendi JNI koprusunu disarida birak ---
@@ -97,6 +101,8 @@ add_library(nvcalls SHARED
         # Telegram'in gunluk sinifinin yerine gecen kucuk uygulama;
         # neden gerektigi dosyanin basinda yaziyor.
         ${CMAKE_CURRENT_LIST_DIR}/filelog.cpp
+        # H264 fabrikasinin bos karsiligi; sebebi dosyanin basinda.
+        ${CMAKE_CURRENT_LIST_DIR}/h264_yok.cpp
         ${NVCALLS_EK_KAYNAKLAR})
 
 target_compile_definitions(nvcalls PRIVATE ${NVCALLS_ANA_TANIMLAR})
