@@ -30,6 +30,21 @@ if(NVCALLS_OPUS_SAYISI LESS 50)
     message(FATAL_ERROR "nvcalls: opus kaynaklari bulunamadi, suzgec guncellenmeli")
 endif()
 
+# --- eski VoIP protokolunu disarida birak ---
+#
+# tgcalls hedefi legacy/InstanceImplLegacy.cpp'yi de derliyor ve o dosya
+# ESKI libtgvoip kutuphanesine bagli. Biz o kutuphaneyi derlemiyoruz;
+# sonucu, kutuphanenin cihazda hic yuklenememesi oluyordu:
+#   dlopen failed: cannot locate symbol "_ZTVN6tgvoip11IPv4AddressE"
+#
+# Legacy protokolu (surum 2.4.4) zaten kullanilmiyor - Kotlin tarafindaki
+# surum listesinde yok ve koprude kaydi da yapilmiyor. Dosyayi hedeften
+# cikarmak, libtgvoip'i butun Android JNI yuku ile birlikte derlemekten
+# hem kucuk hem risksiz.
+get_target_property(NVCALLS_TGCALLS_KAYNAKLARI tgcalls SOURCES)
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "tgcalls/legacy/")
+set_target_properties(tgcalls PROPERTIES SOURCES "${NVCALLS_TGCALLS_KAYNAKLARI}")
+
 # --- linker bayraklarini temizle ---
 #
 # Ana CMakeLists CMAKE_SHARED_LINKER_FLAGS icine uzun bir --exclude-libs
