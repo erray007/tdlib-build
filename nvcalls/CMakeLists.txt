@@ -130,6 +130,16 @@ target_link_libraries(nvcalls
         crypto
         libvpx
         libdav1d
+        # ffmpeg: WebRTC'nin H.264 cozucusu buna bagli.
+        #
+        # Onceden --exclude-libs,ALL bu kodu tumden gizliyordu ve
+        # gerekmiyor gorunuyordu; bayrak daraltilinca ortaya cikti.
+        # Telegram'in kendi link satiri da bu kutuphaneleri veriyor.
+        avcodec
+        avformat
+        avutil
+        swresample
+        swscale
         log
         OpenSLES
         android
