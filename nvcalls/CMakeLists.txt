@@ -19,15 +19,20 @@ get_target_property(NVCALLS_ANA_KAYNAKLAR ${NATIVE_LIB} SOURCES)
 get_target_property(NVCALLS_ANA_TANIMLAR ${NATIVE_LIB} COMPILE_DEFINITIONS)
 get_target_property(NVCALLS_ANA_YOLLAR ${NATIVE_LIB} INCLUDE_DIRECTORIES)
 
-set(NVCALLS_OPUS ${NVCALLS_ANA_KAYNAKLAR})
-list(FILTER NVCALLS_OPUS INCLUDE REGEX "opus/")
+# opus SES kodlayicisi, libyuv ise GORUNTU bicimi cevirileri icin.
+# Ikisi de ayri hedef degil, ana .so'nun kaynak listesinde duruyorlar.
+# libyuv sesli cagrida bile gerekiyor: tgcalls'in ortak kodu ona atif
+# uretiyor ve eksik oldugunda kutuphane cihazda hic yuklenmiyor
+# ("cannot locate symbol I420Copy").
+set(NVCALLS_EK_KAYNAKLAR ${NVCALLS_ANA_KAYNAKLAR})
+list(FILTER NVCALLS_EK_KAYNAKLAR INCLUDE REGEX "opus/|libyuv/")
 
-list(LENGTH NVCALLS_OPUS NVCALLS_OPUS_SAYISI)
-message(STATUS "nvcalls: ${NVCALLS_OPUS_SAYISI} opus kaynagi suzuldu")
-if(NVCALLS_OPUS_SAYISI LESS 50)
-    # Suzgec tutmadiysa (Telegram opus'u baska turlu derlemeye basladiysa)
-    # sessizce eksik bir kutuphane uretmek yerine burada duruluyor.
-    message(FATAL_ERROR "nvcalls: opus kaynaklari bulunamadi, suzgec guncellenmeli")
+list(LENGTH NVCALLS_EK_KAYNAKLAR NVCALLS_EK_SAYISI)
+message(STATUS "nvcalls: ${NVCALLS_EK_SAYISI} opus/libyuv kaynagi suzuldu")
+if(NVCALLS_EK_SAYISI LESS 100)
+    # Suzgec tutmadiysa sessizce eksik bir kutuphane uretmek yerine
+    # burada duruluyor; eksigi cihazda kesfetmek cok pahali.
+    message(FATAL_ERROR "nvcalls: opus/libyuv kaynaklari bulunamadi, suzgec guncellenmeli")
 endif()
 
 # --- eski VoIP protokolunu disarida birak ---
@@ -59,7 +64,7 @@ set(CMAKE_SHARED_LINKER_FLAGS "")
 
 add_library(nvcalls SHARED
         ${CMAKE_CURRENT_LIST_DIR}/nvcalls.cpp
-        ${NVCALLS_OPUS})
+        ${NVCALLS_EK_KAYNAKLAR})
 
 target_compile_definitions(nvcalls PRIVATE ${NVCALLS_ANA_TANIMLAR})
 target_include_directories(nvcalls PRIVATE ${NVCALLS_ANA_YOLLAR})
@@ -77,6 +82,14 @@ target_link_options(nvcalls PRIVATE "-Wl,-z,common-page-size=16384")
 # WebRTC'nin sembolleri TDLib'inkilerle cakismiyor (ikisi de ayni
 # surecte yuklu ve ikisinde de boringssl var).
 target_link_options(nvcalls PRIVATE "-Wl,--exclude-libs,ALL")
+
+# Cozumlenmemis sembol varsa LINK DUSSUN.
+#
+# Varsayilan olarak paylasilan kutuphaneler eksik sembolle de
+# linkleniyor ve hata ancak CIHAZDA, dlopen sirasinda ortaya cikiyor.
+# Her eksik icin ayri bir derleme-kurulum-deneme dongusu gerekiyordu;
+# bu bayrakla hepsi bir kerede burada goruluyor.
+target_link_options(nvcalls PRIVATE "-Wl,--no-undefined")
 
 # whole-archive olanlar: bu uc kutuphane isini STATIK KAYITLA yapiyor
 # (ses aygiti kaydi, kodlayici kaydi). Linker "kimse cagirmiyor" deyip
