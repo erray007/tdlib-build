@@ -93,12 +93,22 @@ target_compile_options(nvcalls PRIVATE -O3 -fexceptions -frtti -Wno-unknown-prag
 target_link_options(nvcalls PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_options(nvcalls PRIVATE "-Wl,-z,common-page-size=16384")
 
-# Statik kutuphanelerin sembolleri disa acilmiyor. Disariya yalniz kendi
-# JNI islevlerimiz cikiyor - onlar bu hedefin kendi kaynagindan geldigi
-# icin etkilenmiyorlar. Kazanci iki yonlu: kutuphane kuculuyor ve
-# WebRTC'nin sembolleri TDLib'inkilerle cakismiyor (ikisi de ayni
-# surecte yuklu ve ikisinde de boringssl var).
-target_link_options(nvcalls PRIVATE "-Wl,--exclude-libs,ALL")
+# --exclude-libs YALNIZ tgcalls arsivlerine uygulaniyor, ALL'a DEGIL.
+#
+# ALL denendi ve cagri sirasinda uygulamayi dusurdu:
+#   UnsatisfiedLinkError: No implementation found for
+#   org.webrtc.SoftwareVideoEncoderFactory.nativeCreateFactory()
+#
+# Sebep: voipandroid arsivi WebRTC'nin Java'dan cagrilan JNI islevlerini
+# tasiyor (sdk/android/src/jni/*). ALL onlarin da disa acilmasini
+# engelliyor ve Java tarafi karsiligini bulamiyor. Telegram'in kendi link
+# satiri da voipandroid'i bu listeye KOYMUYOR.
+#
+# tgcalls arsivleri listede kaliyor: iclerinde disa acilmasi gereken JNI
+# yok ve boylece WebRTC'nin sembolleri TDLib'inkilerle cakismiyor - ikisi
+# de ayni surecte yuklu ve ikisinde de boringssl var.
+target_link_options(nvcalls PRIVATE "-Wl,--exclude-libs,libtgcalls.a")
+target_link_options(nvcalls PRIVATE "-Wl,--exclude-libs,libtgcalls_tp.a")
 
 # Cozumlenmemis sembol varsa LINK DUSSUN.
 #
