@@ -171,14 +171,14 @@ jobs:
           find derleme -name "libnvcalls.so" -exec ls -lh {} \;
           echo
           echo "--- strip edilmis boyut (uygulamaya girecek olan) ---"
-          STRIP=$(find "$NDK_YOLU" -name "llvm-strip" -type f | head -1)
+          STRIP=$(find "$NDK_YOLU" -name "llvm-strip" | head -1)
           for f in $(find derleme -name "libnvcalls.so") ; do
             "$STRIP" --strip-unneeded "$f" -o /tmp/stripli.so
             ls -lh /tmp/stripli.so
           done
           echo
           echo "--- disa acilan JNI islevleri ---"
-          NM=$(find "$NDK_YOLU" -name "llvm-nm" -type f | head -1)
+          NM=$(find "$NDK_YOLU" -name "llvm-nm" | head -1)
           "$NM" --defined-only --extern-only $(find derleme -name "libnvcalls.so" | head -1) \
             | grep -c "Java_com_eray" || true
           echo
@@ -194,7 +194,7 @@ jobs:
         run: |
           HEDEF="cikti/${{ matrix.abi }}"
           mkdir -p "$HEDEF"
-          STRIP=$(find "$NDK_YOLU" -name "llvm-strip" -type f | head -1)
+          STRIP=$(find "$NDK_YOLU" -name "llvm-strip" | head -1)
           "$STRIP" --strip-unneeded \
             "$(find derleme -name 'libnvcalls.so' | head -1)" \
             -o "$HEDEF/libnvcalls.so"
