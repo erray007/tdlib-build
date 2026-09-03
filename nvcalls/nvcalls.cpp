@@ -118,29 +118,52 @@ Cagri *cagriyiAl(jlong isaretci) {
     return reinterpret_cast<Cagri *>(isaretci);
 }
 
+bool webrtcHazir = false;
+
+/**
+ * WebRTC'yi ve geri cagri kimliklerini ILK CAGRIDA hazirlar.
+ *
+ * Kutuphane yuklenirken degil, gercekten cagri kurulurken calisiyor: o
+ * anda JVM tamamen ayakta ve uygulama baglami hazir. Bayrakla korunuyor,
+ * ikinci cagride bir sey yapmiyor.
+ *
+ * Metot kimlikleri de burada aliniyor - Kotlin tarafindaki geri cagri
+ * metotlari companion'da degil NESNENIN KENDISINDE oldugu icin sinif
+ * dogrudan nesneden okunuyor.
+ */
+void hazirla(JNIEnv *env, jobject motor) {
+    if (!webrtcHazir) {
+        JavaVM *vm = nullptr;
+        env->GetJavaVM(&vm);
+        webrtc::InitAndroid(vm);
+        webrtc::JVM::Initialize(vm);
+        rtc::InitializeSSL();
+        webrtcHazir = true;
+    }
+    if (durumMetodu != nullptr) return;
+
+    jclass sinif = env->GetObjectClass(motor);
+    motorSinifi = static_cast<jclass>(env->NewGlobalRef(sinif));
+    durumMetodu = env->GetMethodID(sinif, "durumDegisti", "(I)V");
+    sinyalMetodu = env->GetMethodID(sinif, "sinyalUretildi", "([B)V");
+    sesSeviyesiMetodu = env->GetMethodID(sinif, "sesSeviyeleri", "(FF)V");
+}
+
 } // namespace
 
 extern "C" {
 
 /**
- * Kutuphaneyi hazirlar.
+ * JNI_OnLoad YALNIZ surum bildiriyor.
  *
- * InitAndroid ve InitializeSSL bir kez cagrilmali; ikisi de WebRTC'nin
- * kendi ic durumunu kuruyor.
+ * WebRTC'yi burada baslatmak UYGULAMAYI DUSURUYOR: kutuphane
+ * yuklenirken JVM'in sinif yukleyicisi ve uygulama baglami henuz
+ * WebRTC'nin bekledigi halde degil. Telegram da ayni sebeple baslatmayi
+ * JNI_OnLoad'a degil, ilk gercek cagriya birakiyor
+ * (org_telegram_messenger_voip_Instance.cpp icindeki initWebRTC).
  */
-JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void * /*ayrilmis*/) {
-    webrtc::InitAndroid(vm);
-    webrtc::JVM::Initialize(vm);
-    rtc::InitializeSSL();
+JNIEXPORT jint JNI_OnLoad(JavaVM * /*vm*/, void * /*ayrilmis*/) {
     return JNI_VERSION_1_6;
-}
-
-JNIEXPORT void JNICALL
-Java_com_eray_1bolat_nvgram_cagri_TgcallsMotoru_nativeKur(JNIEnv *env, jclass sinif) {
-    motorSinifi = static_cast<jclass>(env->NewGlobalRef(sinif));
-    durumMetodu = env->GetMethodID(sinif, "durumDegisti", "(I)V");
-    sinyalMetodu = env->GetMethodID(sinif, "sinyalUretildi", "([B)V");
-    sesSeviyesiMetodu = env->GetMethodID(sinif, "sesSeviyeleri", "(FF)V");
 }
 
 /**
@@ -161,6 +184,8 @@ Java_com_eray_1bolat_nvgram_cagri_TgcallsMotoru_nativeBaslat(
     jstring jOzelParametreler,
     jobjectArray jSunucular,
     jstring jGunlukYolu) {
+
+    hazirla(env, motor);
 
     const auto surum = metniAl(env, jSurum);
 
