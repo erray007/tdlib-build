@@ -170,10 +170,10 @@ jobs:
           echo "--- kopru kutuphanesi ---"
           find derleme -name "libnvcalls.so" -exec ls -lh {} \;
           echo
-          echo "--- strip edilmis boyut (uygulamaya girecek olan) ---"
+          echo "--- sembol tablosu korunmus boyut (jniLibs icin) ---"
           STRIP=$(find "$NDK_YOLU" -name "llvm-strip" | head -1)
           for f in $(find derleme -name "libnvcalls.so") ; do
-            "$STRIP" --strip-unneeded "$f" -o /tmp/stripli.so
+            "$STRIP" --strip-debug "$f" -o /tmp/stripli.so
             ls -lh /tmp/stripli.so
           done
           echo
@@ -193,9 +193,16 @@ jobs:
       - name: Ciktiyi topla
         run: |
           HEDEF="cikti/${{ matrix.abi }}"
+          # --strip-debug, --strip-unneeded DEGIL: ikincisi sembol
+          # tablosunu da atiyor ve o dosyadan Play icin cokme cozumleme
+          # sembolu URETILEMIYOR. --strip-debug agir DWARF bilgisini atip
+          # .symtab'i birakiyor; AGP jniLibs'teki bu dosyadan sembolu
+          # kendisi cikariyor ve pakete gireni ayrica striplayip
+          # kucultuyor. Cihaza inen boyut degismiyor, kazanilan sey
+          # cozumlenebilir cokme kaydi.
           mkdir -p "$HEDEF"
           STRIP=$(find "$NDK_YOLU" -name "llvm-strip" | head -1)
-          "$STRIP" --strip-unneeded \
+          "$STRIP" --strip-debug \
             "$(find derleme -name 'libnvcalls.so' | head -1)" \
             -o "$HEDEF/libnvcalls.so"
           ls -lh "$HEDEF/libnvcalls.so"
