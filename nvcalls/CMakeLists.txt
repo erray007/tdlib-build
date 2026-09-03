@@ -50,6 +50,20 @@ get_target_property(NVCALLS_TGCALLS_KAYNAKLARI tgcalls SOURCES)
 list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "tgcalls/legacy/")
 set_target_properties(tgcalls PROPERTIES SOURCES "${NVCALLS_TGCALLS_KAYNAKLARI}")
 
+# --- Telegram'in kendi JNI koprusunu disarida birak ---
+#
+# voipandroid hedefi org_telegram_messenger_voip_Instance.cpp'yi de
+# iceriyor: Telegram'in KENDI cagri koprusu. Bizim kendi koprumuz var
+# (nvcalls.cpp) ve o dosya hem Telegram'in Java siniflarini hem de
+# legacy protokolunu cagiriyor:
+#   undefined symbol: tgcalls::Register<tgcalls::InstanceImplLegacy>()
+#
+# Cikarilmasi hem bu bagi kesiyor hem de ayni JNI islevlerinin iki kez
+# tanimlanmasini engelliyor.
+get_target_property(NVCALLS_ANDROID_KAYNAKLARI voipandroid SOURCES)
+list(FILTER NVCALLS_ANDROID_KAYNAKLARI EXCLUDE REGEX "org_telegram_messenger_voip_Instance")
+set_target_properties(voipandroid PROPERTIES SOURCES "${NVCALLS_ANDROID_KAYNAKLARI}")
+
 # --- linker bayraklarini temizle ---
 #
 # Ana CMakeLists CMAKE_SHARED_LINKER_FLAGS icine uzun bir --exclude-libs
@@ -64,6 +78,9 @@ set(CMAKE_SHARED_LINKER_FLAGS "")
 
 add_library(nvcalls SHARED
         ${CMAKE_CURRENT_LIST_DIR}/nvcalls.cpp
+        # Telegram'in gunluk sinifinin yerine gecen kucuk uygulama;
+        # neden gerektigi dosyanin basinda yaziyor.
+        ${CMAKE_CURRENT_LIST_DIR}/filelog.cpp
         ${NVCALLS_EK_KAYNAKLAR})
 
 target_compile_definitions(nvcalls PRIVATE ${NVCALLS_ANA_TANIMLAR})
