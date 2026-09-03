@@ -48,6 +48,22 @@ endif()
 # hem kucuk hem risksiz.
 get_target_property(NVCALLS_TGCALLS_KAYNAKLARI tgcalls SOURCES)
 list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "tgcalls/legacy/")
+
+# --- ffmpeg tabanli H264 cozucusunu de disarida birak ---
+#
+# h264_decoder_impl.cc avcodec'e bagli ve o bagimlilik arm64'te linki
+# tumden dusuruyor:
+#   relocation ... cannot be used against symbol 'ff_cos_1024';
+#   recompile with -fPIC
+#
+# Telegram'in arm64 ffmpeg arsivi PIC olmayan assembly tablolari
+# tasiyor; paylasilan kutuphaneye konamiyorlar. Ilginc olan, ayni
+# derlemenin x86, x86_64 ve armeabi-v7a'da SORUNSUZ gecmesi - sorun
+# yalniz o mimarinin arsivinde.
+#
+# Cozucu sesli cagrida zaten kullanilmiyor: video yok. Cikarilmasi hem
+# linki duzeltiyor hem de ffmpeg'i tumden gereksiz kiliyor.
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "codecs/h264/h264_decoder_impl")
 set_target_properties(tgcalls PROPERTIES SOURCES "${NVCALLS_TGCALLS_KAYNAKLARI}")
 
 # --- Telegram'in kendi JNI koprusunu disarida birak ---
@@ -130,16 +146,9 @@ target_link_libraries(nvcalls
         crypto
         libvpx
         libdav1d
-        # ffmpeg: WebRTC'nin H.264 cozucusu buna bagli.
-        #
-        # Onceden --exclude-libs,ALL bu kodu tumden gizliyordu ve
-        # gerekmiyor gorunuyordu; bayrak daraltilinca ortaya cikti.
-        # Telegram'in kendi link satiri da bu kutuphaneleri veriyor.
-        avcodec
-        avformat
-        avutil
-        swresample
-        swscale
+        # ffmpeg BILEREK YOK: tek kullanicisi olan H264 cozucusu
+        # yukarida hedeften cikarildi. Linklenseydi arm64'te PIC
+        # hatasiyla dusuyordu.
         log
         OpenSLES
         android
