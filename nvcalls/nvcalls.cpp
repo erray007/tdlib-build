@@ -11,6 +11,7 @@
 // cagri.
 
 #include <jni.h>
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -150,6 +151,33 @@ void hazirla(JNIEnv *env, jobject motor) {
 }
 
 } // namespace
+
+// ---------- ses kalitesi ----------
+//
+// tgcalls bu iki degeri KAYNAKTA SABIT tutuyor (InstanceV2Impl.cpp:
+// setMaxBitrate(32 * 1024) ve kCodecParamPTime 60) ve disaridan
+// ayarlamanin yolu yok - customParameters yalnizca iki ag anahtari
+// okuyor. Bulut derlemesinde o iki sabit, asagidaki fonksiyonlarin
+// cagrisiyla degistiriliyor; boylece deger kullanicinin ayarindan
+// geliyor ve her degisiklikte kutuphaneyi yeniden derlemek gerekmiyor.
+//
+// atomic: tgcalls bu fonksiyonlari KENDI is parcaciklarindan cagiriyor,
+// ayar ise arayuz parcaciginda yaziliyor.
+//
+// Varsayilanlar tgcalls'in kendi degerleri: ayar hic dokunulmazsa
+// davranis Telegram'inkiyle ayni kaliyor.
+namespace {
+std::atomic<int> sesBitrate{32 * 1024};
+std::atomic<int> sesPtime{60};
+} // namespace
+
+extern "C" int nvgramSesBitrate() {
+    return sesBitrate.load(std::memory_order_relaxed);
+}
+
+extern "C" int nvgramSesPtime() {
+    return sesPtime.load(std::memory_order_relaxed);
+}
 
 extern "C" {
 
@@ -321,6 +349,22 @@ Java_com_eray_1bolat_nvgram_cagri_TgcallsMotoru_nativeAgDegisti(
     auto cagri = cagriyiAl(isaretci);
     if (!cagri || !cagri->ornek) return;
     cagri->ornek->setNetworkType(static_cast<NetworkType>(tur));
+}
+
+/**
+ * Ses kalitesini ayarlar.
+ *
+ * CAGRI BASLAMADAN ONCE cagrilmali: ptime kodek kurulurken bir kez
+ * okunuyor, sonradan degistirmek suren cagriyi etkilemiyor.
+ *
+ * bitrateBps yalnizca TAVAN; setMaxBitrate min_bitrate_bps'e dokunmadigi
+ * icin kotu agda Opus kendi asagi iniyor.
+ */
+JNIEXPORT void JNICALL
+Java_com_eray_1bolat_nvgram_cagri_TgcallsMotoru_nativeSesKalitesi(
+    JNIEnv * /*env*/, jobject /*motor*/, jint bitrateBps, jint ptimeMs) {
+    sesBitrate.store(bitrateBps, std::memory_order_relaxed);
+    sesPtime.store(ptimeMs, std::memory_order_relaxed);
 }
 
 /** Kullanilan yansiticinin kimligi; TDLib cagri kapatilirken istiyor. */

@@ -114,6 +114,52 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$SURUM"
           echo "NDK_YOLU=$ANDROID_HOME/ndk/$SURUM" >> "$GITHUB_ENV"
 
+      # Ses kalitesi yamasi: iki sabiti AYARLANABILIR hale getiriyor.
+      #
+      # tgcalls konusma sesi icin iki sabit koyuyor ve IKISI DE
+      # disaridan ayarlanamiyor - customParameters yalnizca
+      # network_kcp_experiment ile network_signaling_nosctp okuyor,
+      # bitrate ve ptime icin gecit yok. Bu yuzden kaynak yamalaniyor.
+      #
+      # OLCUM (2026-09-04, gercek cagri, Wi-Fi):
+      #   BWE Setting start bitrate to: 300 kbps   <- agin tasidigi
+      #   min_bitrate_bps: 32768, max_bitrate_bps: 32768   <- kullanilan
+      # Ag 300 kbps tasirken ses 32 kbps ile gonderiliyordu.
+      #
+      # Sabitler SABIT BIR SAYIYLA DEGIL, koprumuzun iki fonksiyonuyla
+      # degistiriliyor (nvcalls.cpp). Boylece deger kullanicinin ayarindan
+      # geliyor: veri tasarrufu isteyen dusurebiliyor, kalite isteyen
+      # yukseltebiliyor. Kutuphaneyi her kalite degisikliginde yeniden
+      # derlemek gerekmiyor.
+      #
+      #   setMaxBitrate  - yalnizca TAVANI belirliyor; min_bitrate_bps'e
+      #                    dokunmuyor, dolayisiyla kotu agda Opus kendi
+      #                    asagi iniyor.
+      #   ptime          - paket suresi. Telegram 60 ms'i mobil veri ve
+      #                    pil icin seciyor; bedeli ucta uca gecikme.
+      #                    Ekrani goremeyen kullanici gecikmeyi daha cok
+      #                    hissediyor - karsi tarafin sozunu ne zaman
+      #                    bitirdigini yalniz sesten anliyor.
+      - name: Ses kalitesi yamasi
+        run: |
+          KAYNAK=telegram/TMessagesProj/jni/voip/tgcalls/v2/InstanceV2Impl.cpp
+
+          # Bildirimler dosyanin en basina; tanimlari nvcalls.cpp'de.
+          sed -i '1i extern "C" int nvgramSesBitrate();
+extern "C" int nvgramSesPtime();' "$KAYNAK"
+
+          sed -i 's/setMaxBitrate(32 \* 1024)/setMaxBitrate(nvgramSesBitrate())/' "$KAYNAK"
+          sed -i 's/kCodecParamPTime, 60/kCodecParamPTime, nvgramSesPtime()/' "$KAYNAK"
+
+          # Yama tutmazsa DERLEME DUSSUN: sessizce eski kaliteyle
+          # derlenmis bir kutuphane, kalitenin neden degismedigini
+          # cihazda aramaya cevirirdi.
+          grep -q 'setMaxBitrate(nvgramSesBitrate())' "$KAYNAK"             || { echo "HATA: bitrate yamasi tutmadi, kaynak degismis"; exit 1; }
+          grep -q 'kCodecParamPTime, nvgramSesPtime()' "$KAYNAK"             || { echo "HATA: ptime yamasi tutmadi, kaynak degismis"; exit 1; }
+          echo "--- yama uygulandi ---"
+          head -2 "$KAYNAK"
+          grep -n 'nvgramSesBitrate()\|nvgramSesPtime()' "$KAYNAK"
+
       # Kopru hedefi Telegram'in CMake dosyasina ekleniyor.
       #
       # Ayri bir CMake projesi kurmak yerine boyle yapiliyor cunku
