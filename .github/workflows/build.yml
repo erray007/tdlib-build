@@ -12,6 +12,14 @@ on:
       - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
+      hedef:
+        description: "Ne derlensin"
+        type: choice
+        options:
+          - windows
+          - android
+          - ikisi
+        default: windows
       tdlib_ref:
         description: "TDLib surumu: bos birakilirsa asagidaki sabit commit; master ya da bir etiket de yazilabilir"
         required: false
@@ -36,6 +44,13 @@ jobs:
   # ---------------------------------------------------------------
   android:
     name: Android (arm64-v8a, armeabi-v7a, x86_64, x86 + Java)
+    # Elle tetiklerken hedef secilebiliyor: Android derlemesi ~5 saat
+    # suruyor ve yalniz Windows kutuphanesi istendiginde bosuna
+    # calisiyordu. Push ile tetiklenince ikisi de derleniyor.
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.hedef == 'android' ||
+      github.event.inputs.hedef == 'ikisi'
     runs-on: ubuntu-latest
     timeout-minutes: 350
 
@@ -143,7 +158,23 @@ jobs:
   # ---------------------------------------------------------------
   windows:
     name: Windows x64 (tdjson.dll + basliklar)
-    runs-on: windows-latest
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.hedef == 'windows' ||
+      github.event.inputs.hedef == 'ikisi'
+    # RUNNER SABIT: windows-latest DEGIL.
+    #
+    # Masaustu surumu TDLib'e STATIK linkleniyor (Td::TdStatic - JSON
+    # arayuzu degil, tip guvenli C++ API). Statik linkte MSVC'nin STL
+    # surumu ONEMLI: windows-latest VS 2026'ya (MSVC 14.51) gecince
+    # kutuphane, yerel VS 2022'de (MSVC 14.44) BULUNMAYAN vektorize
+    # sembollere atif uretti ve linkleme dustu:
+    #   unresolved external symbol __std_max_element_4i
+    #
+    # Kod tarafinda hata yoktu; yalnizca iki derleyicinin STL'i
+    # ayrismisti. Runner'i VS 2022 ailesine sabitlemek, kutuphaneyi
+    # gelistirme makinesiyle ayni ABI'de tutuyor.
+    runs-on: windows-2022
     timeout-minutes: 350
 
     steps:
