@@ -145,8 +145,15 @@ jobs:
           KAYNAK=telegram/TMessagesProj/jni/voip/tgcalls/v2/InstanceV2Impl.cpp
 
           # Bildirimler dosyanin en basina; tanimlari nvcalls.cpp'de.
-          sed -i '1i extern "C" int nvgramSesBitrate();
-extern "C" int nvgramSesPtime();' "$KAYNAK"
+          # sed '1i' cok satirli metinde kacis kurallari yuzunden
+          # tasinabilir degil; basa ekleme boyle yapiliyor.
+          BILDIRIM=$(mktemp)
+          {
+            echo 'extern "C" int nvgramSesBitrate();'
+            echo 'extern "C" int nvgramSesPtime();'
+            cat "$KAYNAK"
+          } > "$BILDIRIM"
+          mv "$BILDIRIM" "$KAYNAK"
 
           sed -i 's/setMaxBitrate(32 \* 1024)/setMaxBitrate(nvgramSesBitrate())/' "$KAYNAK"
           sed -i 's/kCodecParamPTime, 60/kCodecParamPTime, nvgramSesPtime()/' "$KAYNAK"
