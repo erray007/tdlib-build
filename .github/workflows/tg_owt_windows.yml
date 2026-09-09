@@ -74,12 +74,31 @@ jobs:
       # Derleyici onbellegi: is akisi birden fazla kez calisacak
       # (yapilandirma hatalari, eksik bagimliliklar). Onbellek olmadan
       # her seferinde 2500 dosya bastan derleniyor.
+      #
+      # DUSMESI ISI DURDURMUYOR (continue-on-error). Ilk denemede
+      # sccache'in indirilmesi gecici bir ag hatasiyla dustu ve UC
+      # SAATLIK is daha basinda iptal oldu. Onbellek bir hizlandirma;
+      # derlemenin sarti degil.
       - name: Derleyici onbellegi
+        continue-on-error: true
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           variant: sccache
           key: tg-owt-win-${{ github.event.inputs.tg_owt_ref || env.NVGRAM_TG_OWT_COMMIT }}
           max-size: 2G
+
+      # Onbellek kurulamadiysa CMake'e sccache'i VERMEMEK sart: olmayan
+      # bir baslatici verilirse derleme ilk dosyada duser.
+      - name: Onbellek var mi
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null 2>&1 ; then
+            echo "sccache kullanilacak"
+            echo "ONBELLEK_BAYRAKLARI=-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+          else
+            echo "sccache yok; onbelleksiz derlenecek"
+            echo "ONBELLEK_BAYRAKLARI=" >> "$GITHUB_ENV"
+          fi
 
       # Runner'da vcpkg hazir geliyor (VCPKG_INSTALLATION_ROOT).
       # Ikili onbellek acik: ffmpeg'in derlenmesi tek basina yarim saat
@@ -107,8 +126,7 @@ jobs:
           cmake -G Ninja -Wno-dev \
             -S tg_owt -B derleme \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            $ONBELLEK_BAYRAKLARI \
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/cikti/tg_owt" \
             -DTG_OWT_SPECIAL_TARGET=win64 \
             -DTG_OWT_BUILD_AUDIO_BACKENDS=ON \
