@@ -1,0 +1,160 @@
+name: tg_owt derle (Windows, sesli cagri)
+
+# NVGram'in MASAUSTU surumu icin WebRTC.
+#
+# Sesli cagrida TDLib yalniz SINYALLESMEYI veriyor; sesi tgcalls
+# tasiyor ve tgcalls WebRTC uzerine kurulu. Android tarafinda WebRTC'nin
+# kirpilmis kopyasi Telegram'in kendi deposunda hazir geliyor
+# (tgcalls.yml). Windows'ta o kopya YOK: masaustu icin dogru kaynak
+# desktop-app/tg_owt - Telegram Desktop'in kendi kirpilmis WebRTC'si ve
+# duz CMake ile MSVC'de derleniyor.
+#
+# NEDEN BULUTTA: yaklasik 2500 kaynak dosya. Kullanicinin makinesi 4
+# cekirdek ve D: surucusunde yer dar; TDLib'de ogrenilen dersin aynisi.
+#
+# NE URETIYOR: tg_owt.lib ve yanindaki statik kutuphaneler + basliklar.
+# tgcalls'in KENDISI burada derlenmiyor - o yalnizca yuz kadar dosya ve
+# NVGram'in kendi CMake'inde derleniyor; boylece hangi parcalarinin
+# (yalniz ses) derlenecegine yerelde karar verilebiliyor.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tg_owt_ref:
+        description: "tg_owt surumu: bos birakilirsa asagidaki sabit commit"
+        required: false
+        default: ""
+
+env:
+  # COMMIT olarak sabit; TDLib ve tgcalls'ta ogrenilen dersin aynisi.
+  # Ustteki depo ilerledikce WebRTC'nin API'si degisiyor ve yerelde
+  # yazilan kopru belli bir API'ye gore yaziliyor.
+  #
+  # 19d51d3c = 2026-07-25, "Build with OpenSSL 4 (ASN1_STRING became opaque)"
+  NVGRAM_TG_OWT_COMMIT: 19d51d3c19632a63fdbe17c62f10332d978cb940
+
+  # vcpkg'den gelen bagimliliklar. tg_owt bunlarin yalnizca
+  # BASLIKLARINI istiyor (paketlenmemis derlemede link etmiyor, statik
+  # kutuphane oldugu icin semboller nihai uygulama linklenirken
+  # cozuluyor) - ama .lib dosyalari da ciktiya konuyor cunku NVGram'i
+  # linklerken orada lazim olacaklar.
+  NVGRAM_VCPKG_PAKETLERI: openssl opus ffmpeg libvpx openh264 libjpeg-turbo
+
+jobs:
+  derle:
+    name: windows x64
+    runs-on: windows-2022
+    timeout-minutes: 350
+
+    steps:
+      - name: tg_owt kaynagini al
+        uses: actions/checkout@v4
+        with:
+          repository: desktop-app/tg_owt
+          ref: ${{ github.event.inputs.tg_owt_ref || env.NVGRAM_TG_OWT_COMMIT }}
+          path: tg_owt
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Derlenen surumu yaz
+        shell: bash
+        run: |
+          echo "commit: $(git -C tg_owt rev-parse HEAD)"
+          echo "tarih : $(git -C tg_owt log -1 --format=%ad)"
+          echo "konu  : $(git -C tg_owt log -1 --format=%s)"
+          echo "--- kaynak sayisi ---"
+          find tg_owt/src -name '*.cc' -o -name '*.cpp' -o -name '*.c' | wc -l
+
+      - name: Ninja ve nasm kur
+        shell: bash
+        run: |
+          choco install ninja nasm --no-progress -y
+          echo "C:/Program Files/NASM" >> "$GITHUB_PATH"
+
+      # Derleyici onbellegi: is akisi birden fazla kez calisacak
+      # (yapilandirma hatalari, eksik bagimliliklar). Onbellek olmadan
+      # her seferinde 2500 dosya bastan derleniyor.
+      - name: Derleyici onbellegi
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: sccache
+          key: tg-owt-win-${{ github.event.inputs.tg_owt_ref || env.NVGRAM_TG_OWT_COMMIT }}
+          max-size: 2G
+
+      # Runner'da vcpkg hazir geliyor (VCPKG_INSTALLATION_ROOT).
+      # Ikili onbellek acik: ffmpeg'in derlenmesi tek basina yarim saat
+      # surebiliyor ve is akisi tekrar calistiginda bosuna beklenmesin.
+      - name: Bagimliliklari kur (vcpkg)
+        shell: bash
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+        run: |
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install \
+            --triplet x64-windows \
+            --x-install-root="$GITHUB_WORKSPACE/vcpkg_kurulum" \
+            $NVGRAM_VCPKG_PAKETLERI
+          echo "--- kurulanlar ---"
+          ls "$GITHUB_WORKSPACE/vcpkg_kurulum/x64-windows/include" | head -30
+
+      # TG_OWT_SPECIAL_TARGET bos DEGIL: bos birakilirsa "paketlenmis
+      # derleme" kipine giriyor ve bagimliliklari pkg-config ile ariyor -
+      # Windows'ta yok. win64 verilince yalnizca baslik yollarini
+      # istiyor.
+      - name: Yapilandir
+        shell: bash
+        run: |
+          KURULUM="$GITHUB_WORKSPACE/vcpkg_kurulum/x64-windows"
+          cmake -G Ninja -Wno-dev \
+            -S tg_owt -B derleme \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/cikti/tg_owt" \
+            -DTG_OWT_SPECIAL_TARGET=win64 \
+            -DTG_OWT_BUILD_AUDIO_BACKENDS=ON \
+            -DTG_OWT_OPENSSL_INCLUDE_PATH="$KURULUM/include" \
+            -DTG_OWT_OPUS_INCLUDE_PATH="$KURULUM/include/opus" \
+            -DTG_OWT_FFMPEG_INCLUDE_PATH="$KURULUM/include" \
+            -DTG_OWT_LIBJPEG_INCLUDE_PATH="$KURULUM/include" \
+            -DTG_OWT_LIBVPX_INCLUDE_PATH="$KURULUM/include" \
+            -DTG_OWT_OPENH264_INCLUDE_PATH="$KURULUM/include"
+
+      - name: Derle
+        shell: bash
+        run: cmake --build derleme --config Release
+
+      - name: Kur
+        shell: bash
+        run: |
+          cmake --install derleme --config Release
+          echo "--- uretilen kutuphaneler ---"
+          find "$GITHUB_WORKSPACE/cikti/tg_owt" -name "*.lib" -exec ls -lh {} \;
+
+      # NVGram'i linklerken gereken .lib ve .dll dosyalari da ciktiya
+      # giriyor: tg_owt onlarin sembollerine atif uretiyor ve kullanicinin
+      # makinesinde ffmpeg'i yeniden derlemek saatler alirdi.
+      - name: Bagimliliklari ciktiya kopyala
+        shell: bash
+        run: |
+          KURULUM="$GITHUB_WORKSPACE/vcpkg_kurulum/x64-windows"
+          mkdir -p cikti/bagimliliklar
+          cp -r "$KURULUM/include" cikti/bagimliliklar/
+          cp -r "$KURULUM/lib" cikti/bagimliliklar/
+          cp -r "$KURULUM/bin" cikti/bagimliliklar/
+          du -sh cikti/bagimliliklar/*
+
+      # tgcalls'in KAYNAGI da ciktiya konuyor: NVGram onu kendi
+      # CMake'inde derleyecek ve surumun tg_owt ile uyumlu olmasi sart.
+      - name: tgcalls kaynagini ekle
+        uses: actions/checkout@v4
+        with:
+          repository: TelegramMessenger/tgcalls
+          path: cikti/tgcalls-kaynak
+          fetch-depth: 1
+
+      - name: Cikti yukle
+        uses: actions/upload-artifact@v4
+        with:
+          name: tg-owt-windows-x64
+          path: cikti/
+          if-no-files-found: error
