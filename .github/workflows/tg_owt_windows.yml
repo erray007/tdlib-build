@@ -115,6 +115,42 @@ jobs:
           echo "--- kurulanlar ---"
           ls "$GITHUB_WORKSPACE/vcpkg_kurulum/x64-windows/include" | head -30
 
+      # ESKI WINDOWS SES AYGITINI KAYNAK LISTESINDEN CIKAR.
+      #
+      # modules/audio_device/win/audio_device_core_win.cc MSVC ile
+      # DERLENMIYOR - yirmiden fazla yerde:
+      #
+      #   error C2362: initialization of 'volume' is skipped by 'goto Exit'
+      #
+      # Bu, WebRTC'nin artik bakilmayan ESKI ses aygiti. Chromium onu
+      # derlemiyor; agacta duruyor ama kimse dokunmuyor. Modern
+      # karsiligi (core_audio_base/input/output/utility_win.cc ve
+      # audio_device_module_win.cc) MSVC ile SORUNSUZ derlendi - olculdu,
+      # 598-605 arasi hepsi gecti.
+      #
+      # CIKARMAK GUVENLI: dosyanin sinifina (AudioDeviceWindowsCore) tek
+      # atif audio_device_impl.cc'de ve WEBRTC_WINDOWS_CORE_AUDIO_BUILD
+      # makrosunun arkasinda; tg_owt o makroyu tanimlamiyor. Yani
+      # cozumlenmemis sembol olusmuyor.
+      #
+      # NVGram ses aygitini zaten modern yoldan kuruyor: tgcalls'in
+      # Descriptor'undaki createAudioDeviceModule kancasina
+      # webrtc::CreateWindowsCoreAudioAudioDeviceModule veriliyor.
+      - name: Eski ses aygitini cikar
+        shell: bash
+        run: |
+          KAYNAK=tg_owt/CMakeLists.txt
+          sed -i '/audio_device_core_win/d' "$KAYNAK"
+
+          # Yama tutmazsa DERLEME DUSSUN: sessizce eski haliyle derlemek,
+          # ayni hatayi yirmi dakika sonra yeniden gormek demek.
+          if grep -q 'audio_device_core_win' "$KAYNAK" ; then
+            echo "HATA: eski ses aygiti hala listede"
+            exit 1
+          fi
+          echo "--- cikarildi ---"
+          grep -n "audio_device/win/" "$KAYNAK" | head
+
       # YAPILANDIRMA VE DERLEME TEK ADIMDA, cmd kabugunda.
       #
       # ONCE bash'te ayri adimlarda yapiliyordu ve CMake derleyici olarak
