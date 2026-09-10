@@ -115,36 +115,52 @@ jobs:
           echo "--- kurulanlar ---"
           ls "$GITHUB_WORKSPACE/vcpkg_kurulum/x64-windows/include" | head -30
 
+      # YAPILANDIRMA VE DERLEME TEK ADIMDA, cmd kabugunda.
+      #
+      # ONCE bash'te ayri adimlarda yapiliyordu ve CMake derleyici olarak
+      # MSVC'yi DEGIL, runner'da PATH'te duran MinGW g++'i seciyordu:
+      #
+      #   rtc_base/platform_thread_types.cc:115: error: '__try' was not
+      #   declared in this scope
+      #   rtc_base/network.cc:871: error: 'IF_TYPE_WWANPP' was not declared
+      #
+      # Ikisi de Windows SDK'sinin ve MSVC'nin kendi seyleri; g++ onlari
+      # bilmiyor. Ninja jeneratoru derleyiciyi ORTAMDAN aliyor, yani
+      # vcvars64 calistirilmadan Ninja kullanmak MinGW'ye dusmek demek.
+      # Ortam degiskenleri adimlar arasinda tasinmadigi icin yapilandirma
+      # ve derleme ayni kabukta duruyor.
+      #
       # TG_OWT_SPECIAL_TARGET bos DEGIL: bos birakilirsa "paketlenmis
       # derleme" kipine giriyor ve bagimliliklari pkg-config ile ariyor -
       # Windows'ta yok. win64 verilince yalnizca baslik yollarini
       # istiyor.
-      - name: Yapilandir
+      - name: Yapilandir ve derle (MSVC)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSYOLU=%%i
+          call "%VSYOLU%\VC\Auxiliary\Build\vcvars64.bat"
+          where cl.exe
+          set KURULUM=%GITHUB_WORKSPACE%\vcpkg_kurulum\x64-windows
+          cmake -G Ninja -Wno-dev ^
+            -S tg_owt -B derleme ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ^
+            %ONBELLEK_BAYRAKLARI% ^
+            -DCMAKE_INSTALL_PREFIX=%GITHUB_WORKSPACE%/cikti/tg_owt ^
+            -DTG_OWT_SPECIAL_TARGET=win64 ^
+            -DTG_OWT_BUILD_AUDIO_BACKENDS=ON ^
+            -DTG_OWT_OPENSSL_INCLUDE_PATH=%KURULUM%/include ^
+            -DTG_OWT_OPUS_INCLUDE_PATH=%KURULUM%/include/opus ^
+            -DTG_OWT_FFMPEG_INCLUDE_PATH=%KURULUM%/include ^
+            -DTG_OWT_LIBJPEG_INCLUDE_PATH=%KURULUM%/include ^
+            -DTG_OWT_LIBVPX_INCLUDE_PATH=%KURULUM%/include ^
+            -DTG_OWT_OPENH264_INCLUDE_PATH=%KURULUM%/include || exit /b 1
+          cmake --build derleme || exit /b 1
+          cmake --install derleme || exit /b 1
+
+      - name: Ne uretildi?
         shell: bash
         run: |
-          KURULUM="$GITHUB_WORKSPACE/vcpkg_kurulum/x64-windows"
-          cmake -G Ninja -Wno-dev \
-            -S tg_owt -B derleme \
-            -DCMAKE_BUILD_TYPE=Release \
-            $ONBELLEK_BAYRAKLARI \
-            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/cikti/tg_owt" \
-            -DTG_OWT_SPECIAL_TARGET=win64 \
-            -DTG_OWT_BUILD_AUDIO_BACKENDS=ON \
-            -DTG_OWT_OPENSSL_INCLUDE_PATH="$KURULUM/include" \
-            -DTG_OWT_OPUS_INCLUDE_PATH="$KURULUM/include/opus" \
-            -DTG_OWT_FFMPEG_INCLUDE_PATH="$KURULUM/include" \
-            -DTG_OWT_LIBJPEG_INCLUDE_PATH="$KURULUM/include" \
-            -DTG_OWT_LIBVPX_INCLUDE_PATH="$KURULUM/include" \
-            -DTG_OWT_OPENH264_INCLUDE_PATH="$KURULUM/include"
-
-      - name: Derle
-        shell: bash
-        run: cmake --build derleme --config Release
-
-      - name: Kur
-        shell: bash
-        run: |
-          cmake --install derleme --config Release
           echo "--- uretilen kutuphaneler ---"
           find "$GITHUB_WORKSPACE/cikti/tg_owt" -name "*.lib" -exec ls -lh {} \;
 
