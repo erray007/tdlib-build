@@ -142,14 +142,34 @@ jobs:
           KAYNAK=tg_owt/CMakeLists.txt
           sed -i '/audio_device_core_win/d' "$KAYNAK"
 
-          # Yama tutmazsa DERLEME DUSSUN: sessizce eski haliyle derlemek,
-          # ayni hatayi yirmi dakika sonra yeniden gormek demek.
+          # KAYNAGI CIKARMAK TEK BASINA YETMIYOR.
+          #
+          # audio_device_impl.cc o sinifi WEBRTC_WINDOWS_CORE_AUDIO_BUILD
+          # makrosunun arkasindan cagiriyor ve makro CMake'te DEGIL, bir
+          # BASLIKTA tanimli (audio_device_config.h). Yalniz kaynak
+          # cikarilinca derleme geciyor ama uygulama linklenirken
+          # cozumlenmemis sembol veriyordu:
+          #
+          #   audio_device_impl.cc.obj: LNK2001 ... AudioDeviceWindowsCore
+          #
+          # Makro da kaldiriliyor; boylece o dal hic derlenmiyor.
+          # Varsayilan ses aygiti yolu zaten kullanilmiyor: NVGram
+          # tgcalls'a modern Core Audio uygulamasini acikca veriyor
+          # (createAudioDeviceModule).
+          AYAR=tg_owt/src/modules/audio_device/audio_device_config.h
+          sed -i '/^#define WEBRTC_WINDOWS_CORE_AUDIO_BUILD$/d' "$AYAR"
+
+          # Yamalar tutmazsa DERLEME DUSSUN: sessizce eski haliyle
+          # derlemek, ayni hatayi yirmi dakika sonra yeniden gormek demek.
           if grep -q 'audio_device_core_win' "$KAYNAK" ; then
-            echo "HATA: eski ses aygiti hala listede"
+            echo "HATA: eski ses aygiti hala kaynak listesinde"
             exit 1
           fi
-          echo "--- cikarildi ---"
-          grep -n "audio_device/win/" "$KAYNAK" | head
+          if grep -q '^#define WEBRTC_WINDOWS_CORE_AUDIO_BUILD$' "$AYAR" ; then
+            echo "HATA: WEBRTC_WINDOWS_CORE_AUDIO_BUILD hala tanimli"
+            exit 1
+          fi
+          echo "--- ikisi de cikarildi ---"
 
       # YAPILANDIRMA VE DERLEME TEK ADIMDA, cmd kabugunda.
       #
