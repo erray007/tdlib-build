@@ -24,6 +24,8 @@
 #include "StaticThreads.h"
 #include "v2/InstanceV2Impl.h"
 #include "v2/InstanceV2ReferenceImpl.h"
+#include "group/GroupInstanceCustomImpl.h"
+#include "group/GroupInstanceImpl.h"
 
 #include <rtc_base/ssl_adapter.h>
 #include <sdk/android/native_api/base/init.h>
@@ -78,6 +80,23 @@ jclass motorSinifi = nullptr;
 jmethodID durumMetodu = nullptr;
 jmethodID sinyalMetodu = nullptr;
 jmethodID sesSeviyesiMetodu = nullptr;
+
+/**
+ * Bir GRUP sesli sohbetinin yasadigi sure boyunca tutulan her sey.
+ *
+ * 1:1 cagrinin [Cagri] yapisindan AYRI: grup motorunun protokolu farkli
+ * (tek seferlik katilma yuku + SSRC, mesaj mesaj sinyallesme degil) ve
+ * ayni yapiya sigdirmak ikisini de bozardi.
+ */
+struct GrupCagri {
+    std::unique_ptr<GroupInstanceInterface> ornek;
+    jobject javaMotor = nullptr;
+};
+
+jclass grupMotorSinifi = nullptr;
+jmethodID grupYukMetodu = nullptr;
+jmethodID grupSeviyeMetodu = nullptr;
+jmethodID grupAgMetodu = nullptr;
 
 /** Java dizisini std::vector'e kopyalar. */
 std::vector<uint8_t> baytlariAl(JNIEnv *env, jbyteArray dizi) {
@@ -148,6 +167,36 @@ void hazirla(JNIEnv *env, jobject motor) {
     durumMetodu = env->GetMethodID(sinif, "durumDegisti", "(I)V");
     sinyalMetodu = env->GetMethodID(sinif, "sinyalUretildi", "([B)V");
     sesSeviyesiMetodu = env->GetMethodID(sinif, "sesSeviyeleri", "(FF)V");
+}
+
+/**
+ * GRUP tarafinin karsiligi: WebRTC'yi ve grup geri cagri kimliklerini
+ * ilk cagrida hazirlar.
+ *
+ * Sinif NESNEDEN okunuyor (GetObjectClass), FindClass ile DEGIL:
+ * FindClass sinif yukleyiciye bagli ve uygulama is parcacigi disindan
+ * cagrilinca sinifi bulamiyor. 1:1 tarafinda da ayni karar alinmis.
+ *
+ * Metot adlari ve imzalari GrupMotoru.kt ile BIREBIR ayni olmali;
+ * uyusmazlik derleme zamaninda degil CAGRI SIRASINDA cokuyor.
+ */
+void grupHazirla(JNIEnv *env, jobject motor) {
+    if (!webrtcHazir) {
+        JavaVM *vm = nullptr;
+        env->GetJavaVM(&vm);
+        webrtc::InitAndroid(vm);
+        webrtc::JVM::Initialize(vm);
+        rtc::InitializeSSL();
+        webrtcHazir = true;
+    }
+    if (grupYukMetodu != nullptr) return;
+
+    jclass sinif = env->GetObjectClass(motor);
+    grupMotorSinifi = static_cast<jclass>(env->NewGlobalRef(sinif));
+    grupYukMetodu =
+        env->GetMethodID(sinif, "katilmaYuku", "(ILjava/lang/String;)V");
+    grupSeviyeMetodu = env->GetMethodID(sinif, "sesSeviyeleri", "([I[Z)V");
+    grupAgMetodu = env->GetMethodID(sinif, "agDurumu", "(Z)V");
 }
 
 } // namespace
@@ -399,6 +448,127 @@ Java_com_eray_1bolat_nvgram_cagri_TgcallsMotoru_nativeDurdur(
         delete ornek;
         delete cagri;
     });
+}
+
+// =====================================================================
+// GRUP SESLI SOHBET
+//
+// Grup motoru libtgcalls.a icinde ZATEN derli (Telegram'in jni/voip/
+// CMakeLists.txt'si group/ dosyalarini acikca listeliyor ve bizim
+// CMakeLists yalniz legacy/'yi cikariyor). Buradaki atiflar olmadan
+// baglayici o nesneleri ATIYORDU - libnvcalls.so'da sembolun
+// bulunmamasinin sebebi buydu, derlenmemis olmasi degil.
+// =====================================================================
+
+JNIEXPORT jlong JNICALL
+Java_com_eray_1bolat_nvgram_cagri_GrupMotoru_nativeGrupBaslat(
+    JNIEnv *env, jobject motor) {
+    grupHazirla(env, motor);
+
+    auto *cagri = new GrupCagri();
+    cagri->javaMotor = env->NewGlobalRef(motor);
+    auto *javaMotor = cagri->javaMotor;
+
+    GroupInstanceDescriptor tanim;
+    tanim.threads = StaticThreads::getThreads();
+    tanim.config.need_log = false;
+
+    tanim.networkStateUpdated = [javaMotor](GroupNetworkState durum) {
+        JNIEnv *e = ortam();
+        e->CallVoidMethod(javaMotor, grupAgMetodu,
+                          static_cast<jboolean>(durum.isConnected));
+    };
+
+    // KENDI SEVIYEMIZ SSRC 0 ILE GELIYOR, gercek SSRC'mizle DEGIL.
+    // Kotlin tarafi sifiri arayacak; gercek SSRC aranirsa kendimizi hic
+    // bulamaz ve konustugumuz sunucuya hic bildirilmez.
+    tanim.audioLevelsUpdated = [javaMotor](GroupLevelsUpdate const &g) {
+        JNIEnv *e = ortam();
+        const auto n = static_cast<jsize>(g.updates.size());
+        std::vector<jint> s(static_cast<std::size_t>(n));
+        std::vector<jboolean> k(static_cast<std::size_t>(n));
+        for (jsize i = 0; i < n; ++i) {
+            s[static_cast<std::size_t>(i)] =
+                static_cast<jint>(g.updates[static_cast<std::size_t>(i)].ssrc);
+            k[static_cast<std::size_t>(i)] =
+                g.updates[static_cast<std::size_t>(i)].value.voice ? JNI_TRUE
+                                                                   : JNI_FALSE;
+        }
+        jintArray ssrcler = e->NewIntArray(n);
+        jbooleanArray konusanlar = e->NewBooleanArray(n);
+        if (n > 0) {
+            e->SetIntArrayRegion(ssrcler, 0, n, s.data());
+            e->SetBooleanArrayRegion(konusanlar, 0, n, k.data());
+        }
+        e->CallVoidMethod(javaMotor, grupSeviyeMetodu, ssrcler, konusanlar);
+        // YEREL BASVURULAR SILINIYOR: bu geri cagri saniyede onlarca kez
+        // geliyor ve yerel basvuru tablosu dolarsa JVM sureci dusuruyor.
+        e->DeleteLocalRef(ssrcler);
+        e->DeleteLocalRef(konusanlar);
+    };
+
+    // DOGRUDAN YAPICI: bu sinifta Meta::Create gibi bir fabrika yok ve
+    // 1:1'deki surum secimi grupta gecerli degil - tek uygulama var.
+    cagri->ornek =
+        std::make_unique<GroupInstanceCustomImpl>(std::move(tanim));
+    return reinterpret_cast<jlong>(cagri);
+}
+
+JNIEXPORT void JNICALL
+Java_com_eray_1bolat_nvgram_cagri_GrupMotoru_nativeGrupKatilmaYukuIste(
+    JNIEnv * /*env*/, jobject /*motor*/, jlong isaretci) {
+    auto *c = reinterpret_cast<GrupCagri *>(isaretci);
+    if (c == nullptr || !c->ornek) return;
+    auto *javaMotor = c->javaMotor;
+    c->ornek->emitJoinPayload([javaMotor](GroupJoinPayload const &yuk) {
+        JNIEnv *e = ortam();
+        jstring json = e->NewStringUTF(yuk.json.c_str());
+        e->CallVoidMethod(javaMotor, grupYukMetodu,
+                          static_cast<jint>(yuk.audioSsrc), json);
+        e->DeleteLocalRef(json);
+    });
+}
+
+JNIEXPORT void JNICALL
+Java_com_eray_1bolat_nvgram_cagri_GrupMotoru_nativeGrupKatilmaCevabi(
+    JNIEnv *env, jobject /*motor*/, jlong isaretci, jstring jJson) {
+    auto *c = reinterpret_cast<GrupCagri *>(isaretci);
+    if (c == nullptr || !c->ornek) return;
+    c->ornek->setJoinResponsePayload(metniAl(env, jJson));
+}
+
+JNIEXPORT void JNICALL
+Java_com_eray_1bolat_nvgram_cagri_GrupMotoru_nativeGrupSesiKes(
+    JNIEnv * /*env*/, jobject /*motor*/, jlong isaretci, jboolean kesik) {
+    auto *c = reinterpret_cast<GrupCagri *>(isaretci);
+    if (c != nullptr && c->ornek) c->ornek->setIsMuted(kesik == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
+Java_com_eray_1bolat_nvgram_cagri_GrupMotoru_nativeGrupSesSeviyesi(
+    JNIEnv * /*env*/, jobject /*motor*/, jlong isaretci, jint ssrc,
+    jdouble carpan) {
+    auto *c = reinterpret_cast<GrupCagri *>(isaretci);
+    if (c != nullptr && c->ornek)
+        c->ornek->setVolume(static_cast<uint32_t>(ssrc), carpan);
+}
+
+JNIEXPORT void JNICALL
+Java_com_eray_1bolat_nvgram_cagri_GrupMotoru_nativeGrupDurdur(
+    JNIEnv *env, jobject /*motor*/, jlong isaretci) {
+    auto *c = reinterpret_cast<GrupCagri *>(isaretci);
+    if (c == nullptr) return;
+    if (c->ornek) {
+        // stop() tamamlamasi MEDYA is parcaciginda calisiyor, yani orada
+        // silmek calismakta olan nesneyi silmek olurdu. Yikim burada
+        // yapiliyor ve ~GroupInstanceCustomImpl medya is parcaciginda
+        // BlockingCall ile bekliyor - yani BU CAGRI BLOKLUYOR. Kotlin
+        // tarafi bunu arayuz is parcaciginda cagirmamali.
+        c->ornek->stop([] {});
+        c->ornek.reset();
+    }
+    if (c->javaMotor != nullptr) env->DeleteGlobalRef(c->javaMotor);
+    delete c;
 }
 
 } // extern "C"
