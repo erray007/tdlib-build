@@ -68,6 +68,33 @@ list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "tgcalls/legacy/")
 # nvcalls/h264_yok.cpp geciyor.
 list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "codecs/h264/h264_decoder_impl")
 list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "codecs/h264/h264\.cc")
+
+# --- grup YAYIN AKISI parcalarini da disarida birak ---
+#
+# Grup sesli sohbet eklenince (2026-10-03) baglayici grup nesnelerini
+# artik atmiyor ve bu dosyalarin ffmpeg bagimliligi ortaya cikti:
+#   ld.lld: error: undefined symbol: avcodec_close
+#   >>> referenced by VideoStreamingPart.cpp:375
+#
+# ffmpeg'i linklemek ARM64'TE MUMKUN DEGIL - yukarida H264 icin yazilan
+# ayni sebep: Telegram'in arm64 arsivi PIC olmayan assembly tablolari
+# tasiyor (ff_cos_1024).
+#
+# YAYIN AKISI SESLI SOHBETTE KULLANILMIYOR: bu yol kanal CANLI
+# YAYINLARINI dinlemek icin. Gruplarda sesli sohbete katilma o parcalara
+# hic ugramiyor; yalnizca GroupInstanceCustomImpl -> StreamingMediaContext
+# zincirinden atif aldiklari icin LINKLENMELERI gerekiyor, calismalari
+# gerekmiyor. Yuzeyleri nvcalls/yayin_yok.cpp ile karsilaniyor.
+#
+# KANAL CANLI YAYINI EKLENDIGINDE: bu filtreler ve yayin_yok.cpp
+# kaldirilip arm64 icin ffmpeg -fPIC ile yeniden derlenmeli. Ayni is
+# H264 cozucusunu de geri getirir.
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "group/AudioStreamingPart\.cpp")
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "group/AudioStreamingPartInternal")
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "group/AudioStreamingPartPersistentDecoder")
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "group/VideoStreamingPart")
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "group/AVIOContextImpl")
+list(FILTER NVCALLS_TGCALLS_KAYNAKLARI EXCLUDE REGEX "group/StreamingAudioRenderer")
 set_target_properties(tgcalls PROPERTIES SOURCES "${NVCALLS_TGCALLS_KAYNAKLARI}")
 
 # --- Telegram'in kendi JNI koprusunu disarida birak ---
@@ -103,6 +130,9 @@ add_library(nvcalls SHARED
         ${CMAKE_CURRENT_LIST_DIR}/filelog.cpp
         # H264 fabrikasinin bos karsiligi; sebebi dosyanin basinda.
         ${CMAKE_CURRENT_LIST_DIR}/h264_yok.cpp
+        # Grup yayin akisi parcalarinin bos karsiligi; sebebi dosyanin
+        # basinda ve yukaridaki filtre blogunda.
+        ${CMAKE_CURRENT_LIST_DIR}/yayin_yok.cpp
         ${NVCALLS_EK_KAYNAKLAR})
 
 target_compile_definitions(nvcalls PRIVATE ${NVCALLS_ANA_TANIMLAR})
